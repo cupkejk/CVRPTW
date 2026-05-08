@@ -1,14 +1,33 @@
-# TSP in Rust
+# CVRPTW Solver
 
-A visualization of various algorithms for solving the Traveling Salesperson Problem (TSP), built with Rust and the [Macroquad](https://macroquad.rs/) game engine.
+An interactive visualizer for the **Capacitated Vehicle Routing Problem with Time Windows (CVRPTW)**, built with Rust and [Macroquad](https://macroquad.rs/).
 
-## Features
+Routes are optimized in real time using **Simulated Annealing** — watch vehicles find better paths as the temperature cools.
 
-- **Simulated Annealing (SA)**: A probabilistic technique for approximating the global optimum of a given function.
-- **2-Opt**: A simple local search algorithm that removes "crosses" in the tour by swapping edges.
-- **Held-Karp (Classical)**: An exact dynamic programming algorithm that finds the optimal solution (capped at 23 cities due to exponential complexity).
-- **Interactive Visualization**: Watch the algorithms improve the tour in real-time.
-- **Benchmarking Mode**: Compare the performance and accuracy of different algorithms.
+---
+
+## Problem
+
+Given a depot and a set of customers, find the minimum-distance set of vehicle routes such that:
+
+- Every customer is visited exactly once
+- Each vehicle starts and ends at the depot
+- Vehicle **capacity** is not exceeded (`100` units per vehicle)
+- Each customer is served within their **time window** `[ready, due]`
+- All vehicles return to the depot within the global time window (`2000`)
+
+---
+
+## Algorithm — Simulated Annealing
+
+At each step the solver picks a random customer from one route and tries to insert it into another. The move is accepted if it:
+
+- Reduces total distance, **or**
+- Passes the probabilistic acceptance check: `e^(-Δ/T) > random(0,1)`
+
+Temperature cools by a factor of `0.99999` each iteration, gradually shifting from exploration to exploitation. Empty routes are pruned after each accepted move.
+
+---
 
 ## Getting Started
 
@@ -16,46 +35,44 @@ A visualization of various algorithms for solving the Traveling Salesperson Prob
 
 - [Rust](https://www.rust-lang.org/tools/install) (2024 edition)
 
-### Running the Visualization
-
-To start the interactive visualization:
+### Run
 
 ```bash
 cargo run --release
 ```
 
-You can also specify the initial number of cities:
+---
 
-```bash
-cargo run --release -- --cities 15
-```
+## Controls
 
-### Controls
+| Key | Action |
+|---|---|
+| `Space` (hold) | Run 500 SA iterations per frame |
+| `R` | Reset with a new random problem (30 customers) |
 
-- **`A`**: Start Simulated Annealing
-- **`T`**: Start 2-Opt optimization
-- **`C`**: Start Classical (Held-Karp) exact solver
-- **`H`**: Generate new random cities and reset
-- **`R`**: Randomize the current tour
-- **`N`**: Add a new city at a random position
-- **`S`**: Stop the currently running algorithm
-- **`Esc`**: Exit the application
+---
 
-### Benchmarking
+## Visualization
 
-To run benchmarks and compare algorithm performance:
+Each vehicle route is drawn in a distinct color. The white square at the center is the depot; grey circles are customers. The HUD shows the current number of vehicles, total route distance, and SA temperature.
 
-```bash
-cargo run --release -- --test [max_cities]
-```
+---
 
-Example: `cargo run --release -- --test 12`
+## Parameters
 
-## Implementation Details
+| Constant | Value | Description |
+|---|---|---|
+| `VEHICLE_CAPACITY` | `100.0` | Max demand load per vehicle |
+| `DEPOT_TIME_WINDOW` | `2000.0` | Latest return time to depot |
+| `BORDER` | `50.0` | Screen edge padding for customer placement |
+| Customer demand | `10–30` | Randomly sampled per customer |
+| Customer time window | `[0–500, 600–2000]` | Randomly sampled ready/due times |
+| Service time | `20.0` | Fixed time spent at each customer |
 
-- **Language**: Rust
-- **Graphics**: Macroquad
-- **Algorithms**:
-  - `update_sa`: Reverses segments of the tour and accepts changes based on distance improvement or a temperature-based probability.
-  - `update_two_opt`: Iteratively improves the tour by swapping edges if it results in a shorter path.
-  - `update_classical`: Implements the Held-Karp dynamic programming approach with $O(2^n n^2)$ complexity.
+---
+
+## Built With
+
+- [Rust](https://www.rust-lang.org/)
+- [Macroquad](https://macroquad.rs/) — cross-platform graphics
+- [rand](https://docs.rs/rand) — random number generation
