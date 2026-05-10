@@ -1,9 +1,9 @@
-use macroquad::prelude::*;
+use ::macroquad::prelude::*;
 use ::rand::{rng, RngExt, rngs::ThreadRng};
 
 const BORDER: f32 = 50.0;
 const VEHICLE_CAPACITY: f32 = 100.0;
-const DEPOT_TIME_WINDOW: f32 = 2000.0;
+const DEPOT_TIME_WINDOW: f32 = 4000.0;
 
 #[derive(Clone, Debug)]
 struct Customer {
@@ -32,14 +32,16 @@ impl State {
 
         let mut customers = Vec::new();
         for _ in 0..n {
+            let pos = vec2(
+                rng.random_range(BORDER..(w - BORDER)),
+                rng.random_range(BORDER..(h - BORDER)),
+            );
+            let dist_from_depo = pos.distance(depot);
             customers.push(Customer {
-                pos: vec2(
-                    rng.random_range(BORDER..(w - BORDER)),
-                    rng.random_range(BORDER..(h - BORDER)),
-                ),
+                pos,
                 demand: rng.random_range(10.0..30.0),
                 ready: rng.random_range(0.0..500.0),
-                due: rng.random_range(600.0..DEPOT_TIME_WINDOW),
+                due: rng.random_range((dist_from_depo + 100.0)..DEPOT_TIME_WINDOW),
                 service: 20.0,
             });
         }
@@ -103,40 +105,74 @@ impl State {
     fn update_sa(&mut self) {
         if self.temp < 0.01 { return; }
 
-        
         let r1_idx = self.rng.random_range(0..self.routes.len());
-        let r2_idx = self.rng.random_range(0..self.routes.len());
-        if r1_idx == r2_idx || self.routes[r1_idx].is_empty() { return; }
-
         
-        let cust_idx_in_r1 = self.rng.random_range(0..self.routes[r1_idx].len());
-        let customer = self.routes[r1_idx][cust_idx_in_r1];
-        
-        let mut new_r1 = self.routes[r1_idx].clone();
-        new_r1.remove(cust_idx_in_r1);
-
-        let mut new_r2 = self.routes[r2_idx].clone();
-        let insert_pos = self.rng.random_range(0..=new_r2.len());
-        new_r2.insert(insert_pos, customer);
-
-        if self.is_valid(&new_r1) && self.is_valid(&new_r2) {
-            let old_dist = self.calculate_route_dist(&self.routes[r1_idx]) + self.calculate_route_dist(&self.routes[r2_idx]);
-            let new_dist = self.calculate_route_dist(&new_r1) + self.calculate_route_dist(&new_r2);
+        if self.rng.random_bool(0.5) && self.routes[r1_idx].len() >= 2 {
             
-            let delta = (new_dist - old_dist) as f64;
-            if delta < 0.0 || self.rng.random_range(0.0..1.0) < (-delta / self.temp).exp() {
-                self.routes[r1_idx] = new_r1;
-                self.routes[r2_idx] = new_r2;
-                
-                self.routes.retain(|r| !r.is_empty());
-                self.total_dist = self.calculate_all_dist();
+            let mut new_route = self.routes[r1_idx].clone();
+            let i = self.rng.random_range(0..new_route.len());
+            let j = self.rng.random_range(0..new_route.len());
+            new_route.swap(i, j);
+
+            if self.is_valid(&new_route) {
+                let old_d = self.calculate_route_dist(&self.routes[r1_idx]);
+                let new_d = self.calculate_route_dist(&new_route);
+                let delta = (new_d - old_d) as f64;
+
+                if delta < 0.0 || self.rng.random_range(0.0..1.0) < (-delta / self.temp).exp() {
+                    self.routes[r1_idx] = new_route;
+                    self.total_dist = self.calculate_all_dist();
+                }
+            }
+        } else {
+            
+            let r2_idx = self.rng.random_range(0..self.routes.len());
+            if r1_idx == r2_idx || self.routes[r1_idx].is_empty() { return; }
+
+            let cust_idx = self.rng.random_range(0..self.routes[r1_idx].len());
+            let customer = self.routes[r1_idx][cust_idx];
+
+            let mut new_r1 = self.routes[r1_idx].clone();
+            new_r1.remove(cust_idx);
+
+            let mut new_r2 = self.routes[r2_idx].clone();
+            let insert_pos = self.rng.random_range(0..=new_r2.len());
+            new_r2.insert(insert_pos, customer);
+
+            if self.is_valid(&new_r1) && self.is_valid(&new_r2) {
+                let old_d = self.calculate_route_dist(&self.routes[r1_idx]) + self.calculate_route_dist(&self.routes[r2_idx]);
+                let new_d = self.calculate_route_dist(&new_r1) + self.calculate_route_dist(&new_r2);
+                let delta = (new_d - old_d) as f64;
+
+                if delta < 0.0 || self.rng.random_range(0.0..1.0) < (-delta / self.temp).exp() {
+                    self.routes[r1_idx] = new_r1;
+                    self.routes[r2_idx] = new_r2;
+                    self.routes.retain(|r| !r.is_empty());
+                    self.total_dist = self.calculate_all_dist();
+                }
             }
         }
         self.temp *= 0.99999;
     }
 
     fn draw(&self) {
-        let colors = [RED, BLUE, GREEN, YELLOW, PURPLE, ORANGE, MAGENTA];
+        let colors = [
+            Color::from_rgba(255, 0, 0, 255),
+            Color::from_rgba(0, 255, 0, 255),
+            Color::from_rgba(0, 0, 255, 255),
+            Color::from_rgba(0, 255, 255, 255),
+            Color::from_rgba(255, 0, 255, 255),
+            Color::from_rgba(255, 255, 0, 255),
+            Color::from_rgba(255, 255, 255, 255),
+            Color::from_rgba(127, 0, 0, 255),
+            Color::from_rgba(0, 127, 0, 255),
+            Color::from_rgba(0, 0, 127, 255),
+            Color::from_rgba(0, 127, 127, 255),
+            Color::from_rgba(127, 0, 127, 255),
+            Color::from_rgba(127, 127, 0, 255),
+            Color::from_rgba(127, 127, 127, 255),
+        ];
+        //let colors = [RED, BLUE, GREEN, YELLOW, PURPLE, ORANGE, MAGENTA];
         for (i, route) in self.routes.iter().enumerate() {
             let color = colors[i % colors.len()];
             let mut prev = self.depot;
@@ -161,9 +197,21 @@ impl State {
     }
 }
 
-#[macroquad::main("CVRPWTW Solver")]
+fn window_conf() -> Conf {
+    Conf {
+        window_title: "CVRPTW Solver".to_owned(),
+        fullscreen: true,
+        ..Default::default()
+    }
+}
+
+#[macroquad::main(window_conf)]
 async fn main() {
-    let mut state = State::new(30);
+    let default_num: usize = 50;
+    for _i in 0..60 {
+        next_frame().await
+    }
+    let mut state = State::new(default_num);
 
     loop {
         clear_background(BLACK);
@@ -175,11 +223,15 @@ async fn main() {
         }
 
         if is_key_pressed(KeyCode::R) {
-            state = State::new(30);
+            state = State::new(default_num);
+        }
+
+        if is_key_pressed(KeyCode::Escape) {
+            break;
         }
 
         state.draw();
-        draw_text("Hold SPACE to Optimize | Press R to Reset", 20.0, screen_height() - 20.0, 20.0, LIGHTGRAY);
+        draw_text("Hold SPACE to Optimize | Press R to Reset | Press Esc to Exit", 20.0, screen_height() - 20.0, 20.0, LIGHTGRAY);
         
         next_frame().await
     }
