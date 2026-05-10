@@ -49,6 +49,7 @@ cargo run --release
 |---|---|
 | `Space` (hold) | Run 500 SA iterations per frame |
 | `R` | Reset with a new random problem (30 customers) |
+| `Escape` | Exit the simulation |
 
 ---
 
