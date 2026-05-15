@@ -64,6 +64,11 @@ impl State {
         self.total_dist = self.calculate_all_dist();
     }
 
+    fn soft_reset(&mut self) {
+        self.initial_solution();
+        self.temp = 1000.0;
+    }
+
     fn calculate_route_dist(&self, route: &[usize]) -> f32 {
         if route.is_empty() { return 0.0; }
         let mut d = self.depot.distance(self.customers[route[0]].pos);
@@ -100,6 +105,75 @@ impl State {
 
         
         time + prev_pos.distance(self.depot) <= DEPOT_TIME_WINDOW
+    }
+
+    fn solve_exact(&mut self) {
+        let mut best_routes = self.routes.clone();
+        let mut best_dist = self.total_dist;
+        
+        let mut unassigned: Vec<usize> = (0..self.customers.len()).collect();
+        let mut current_routes: Vec<Vec<usize>> = Vec::new();
+        let mut iters = 0;
+        
+        self.bb_recursive(&mut unassigned, &mut current_routes, 0.0, &mut best_routes, &mut best_dist, &mut iters);
+        
+        if best_dist < self.total_dist {
+            self.routes = best_routes;
+            self.total_dist = best_dist;
+        }
+    }
+
+    fn bb_recursive(
+        &self,
+        unassigned: &mut Vec<usize>,
+        current_routes: &mut Vec<Vec<usize>>,
+        current_dist: f32,
+        best_routes: &mut Vec<Vec<usize>>,
+        best_dist: &mut f32,
+        iters: &mut usize
+    ) {
+        *iters += 1;
+        // Limit iterations so the main thread doesn't lock up indefinitely for N=50
+        if *iters > 5_000_000 {
+            return;
+        }
+
+        if current_dist >= *best_dist {
+            return;
+        }
+
+        if unassigned.is_empty() {
+            *best_dist = current_dist;
+            *best_routes = current_routes.clone();
+            return;
+        }
+
+        let cust = unassigned.pop().unwrap();
+
+        for r_idx in 0..current_routes.len() {
+            for insert_pos in 0..=current_routes[r_idx].len() {
+                let old_route_dist = self.calculate_route_dist(&current_routes[r_idx]);
+                current_routes[r_idx].insert(insert_pos, cust);
+                if self.is_valid(&current_routes[r_idx]) {
+                    let new_route_dist = self.calculate_route_dist(&current_routes[r_idx]);
+                    let new_dist = current_dist - old_route_dist + new_route_dist;
+                    if new_dist < *best_dist {
+                        self.bb_recursive(unassigned, current_routes, new_dist, best_routes, best_dist, iters);
+                    }
+                }
+                current_routes[r_idx].remove(insert_pos);
+            }
+        }
+
+        current_routes.push(vec![cust]);
+        let new_route_dist = self.calculate_route_dist(&current_routes.last().unwrap());
+        let new_dist = current_dist + new_route_dist;
+        if new_dist < *best_dist {
+            self.bb_recursive(unassigned, current_routes, new_dist, best_routes, best_dist, iters);
+        }
+        current_routes.pop();
+
+        unassigned.push(cust);
     }
 
     fn update_sa(&mut self) {
@@ -207,31 +281,66 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let default_num: usize = 50;
+    let default_num: usize = 15;
     for _i in 0..60 {
         next_frame().await
     }
     let mut state = State::new(default_num);
+    let mut working = false;
+    let mut working_rendered = false;
 
     loop {
         clear_background(BLACK);
 
-        if is_key_down(KeyCode::Space) {
-            for _ in 0..500 {
-                state.update_sa();
+        if working && working_rendered {
+            state.solve_exact();
+            working = false;
+            working_rendered = false;
+        } else if working {
+            working_rendered = true;
+        }
+
+        if !working {
+            if is_key_down(KeyCode::Space) {
+                for _ in 0..500 {
+                    state.update_sa();
+                }
+            }
+
+            if is_key_pressed(KeyCode::S) {
+                state.soft_reset();
+            }
+
+            if is_key_pressed(KeyCode::R) {
+                state = State::new(default_num);
+            }
+
+            if is_key_pressed(KeyCode::Escape) {
+                break;
+            }
+
+            if is_key_pressed(KeyCode::B) {
+                working = true;
+                working_rendered = false;
             }
         }
 
-        if is_key_pressed(KeyCode::R) {
-            state = State::new(default_num);
-        }
-
-        if is_key_pressed(KeyCode::Escape) {
-            break;
-        }
-
         state.draw();
-        draw_text("Hold SPACE to Optimize | Press R to Reset | Press Esc to Exit", 20.0, screen_height() - 20.0, 20.0, LIGHTGRAY);
+
+        if working {
+            let text = "Working... (Branch and Bound)";
+            let text_size = measure_text(text, None, 50, 1.0);
+            draw_rectangle(
+                screen_width() / 2.0 - text_size.width / 2.0 - 10.0,
+                screen_height() / 2.0 - text_size.height / 2.0 - 10.0,
+                text_size.width + 20.0,
+                text_size.height + 20.0,
+                Color::from_rgba(0, 0, 0, 200)
+            );
+            draw_text(text, screen_width() / 2.0 - text_size.width / 2.0, screen_height() / 2.0 + text_size.height / 2.0 - 10.0, 50.0, RED);
+        }
+
+        draw_text("Hold SPACE to Optimize | Press R to Reset | Press S to Soft Reset | Press B for Exact (B&B) | Press Esc to Exit", 20.0, screen_height() - 20.0, 20.0, LIGHTGRAY);
         
         next_frame().await
     }
