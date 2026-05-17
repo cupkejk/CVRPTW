@@ -21,14 +21,18 @@ Given a depot and a set of customers, find the minimum-distance set of vehicle r
 ## Algorithms
 
 ### 1. Simulated Annealing (Heuristic)
-At each step the solver picks a random customer from one route and tries to insert it into another. The move is accepted if it:
-- Reduces total distance, **or**
-- Passes the probabilistic acceptance check: `e^(-Δ/T) > random(0,1)`
+At each step the solver randomly selects one of four neighborhood operators:
+- **Intra-route 2-opt**: Reverses a segment within a route to untangle crossings.
+- **Inter-route Relocate**: Moves a customer from one route to another.
+- **Inter-route Swap**: Swaps a customer in one route with a customer in another.
+- **Intra-route Swap**: Swaps two customers within the same route.
 
-Temperature cools by a factor of `0.99999` each iteration, gradually shifting from exploration to exploitation. Empty routes are pruned after each accepted move.
+The algorithm heavily incentivizes minimizing the number of vehicles by applying a cost penalty to each active route during relocation. Moves are accepted if they improve the objective score or pass the probabilistic acceptance check: `e^(-Δ/T) > random(0,1)`.
+
+The temperature cools by a factor of `0.99` every 100 iterations, creating plateaus that allow the search to explore local neighborhoods before cooling down. Empty routes are pruned dynamically.
 
 ### 2. Branch and Bound (Exact)
-Systematically explores the search tree of all valid route permutations. It uses the best route found so far as an upper bound to prune branches that cannot yield a better solution. Note that this algorithm is computationally expensive and runs on the main thread, capping at 5,000,000 iterations to prevent indefinite freezing.
+Systematically explores the search tree of all valid route permutations. It uses the best route found so far as an upper bound to prune branches that cannot yield a better solution. Note that this algorithm is computationally expensive and runs on the main thread, which may cause freezing for larger problem sizes.
 
 ---
 
@@ -70,9 +74,10 @@ Each vehicle route is drawn in a distinct color. The white square at the center 
 |---|---|---|
 | `VEHICLE_CAPACITY` | `100.0` | Max demand load per vehicle |
 | `DEPOT_TIME_WINDOW` | `4000.0` | Latest return time to depot |
+| `VEHICLE_COST` | `2000.0` | Penalty cost per active vehicle in SA and B&B |
 | `BORDER` | `50.0` | Screen edge padding for customer placement |
 | Customer demand | `10–30` | Randomly sampled per customer |
-| Customer time window | `[0–500, 600–4000]` | Randomly sampled ready/due times |
+| Customer time window | `[0–500, (dist_from_depo + 100.0)–4000]` | Randomly sampled ready/due times |
 | Service time | `20.0` | Fixed time spent at each customer |
 
 ---

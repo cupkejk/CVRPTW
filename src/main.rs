@@ -4,6 +4,7 @@ use ::rand::{rng, RngExt, rngs::ThreadRng};
 const BORDER: f32 = 50.0;
 const VEHICLE_CAPACITY: f32 = 100.0;
 const DEPOT_TIME_WINDOW: f32 = 4000.0;
+const VEHICLE_COST: f32 = 2000.0; // Dodana stała kosztu pojazdu zgodna z SA
 
 #[derive(Clone, Debug)]
 struct Customer {
@@ -21,6 +22,7 @@ struct State {
     rng: ThreadRng,
     temp: f64,
     total_dist: f32,
+    iterations: usize,
 }
 
 impl State {
@@ -53,12 +55,12 @@ impl State {
             rng,
             temp: 1000.0,
             total_dist: 0.0,
+            iterations: 0,
         };
         s.initial_solution();
         s
     }
 
-    
     fn initial_solution(&mut self) {
         self.routes = (0..self.customers.len()).map(|i| vec![i]).collect();
         self.total_dist = self.calculate_all_dist();
@@ -67,6 +69,7 @@ impl State {
     fn soft_reset(&mut self) {
         self.initial_solution();
         self.temp = 1000.0;
+        self.iterations = 0;
     }
 
     fn calculate_route_dist(&self, route: &[usize]) -> f32 {
@@ -83,7 +86,6 @@ impl State {
         self.routes.iter().map(|r| self.calculate_route_dist(r)).sum()
     }
 
-    
     fn is_valid(&self, route: &[usize]) -> bool {
         let mut time = 0.0;
         let mut load = 0.0;
@@ -103,13 +105,14 @@ impl State {
             prev_pos = c.pos;
         }
 
-        
         time + prev_pos.distance(self.depot) <= DEPOT_TIME_WINDOW
     }
 
     fn solve_exact(&mut self) {
         let mut best_routes = self.routes.clone();
-        let mut best_dist = self.total_dist;
+        
+        // Wyznaczamy best_dist jako sumę dystansu oraz kosztu dotychczasowych pojazdów z SA
+        let mut best_dist = self.total_dist + (self.routes.iter().filter(|r| !r.is_empty()).count() as f32 * VEHICLE_COST);
         
         let mut unassigned: Vec<usize> = (0..self.customers.len()).collect();
         let mut current_routes: Vec<Vec<usize>> = Vec::new();
@@ -117,10 +120,11 @@ impl State {
         
         self.bb_recursive(&mut unassigned, &mut current_routes, 0.0, &mut best_routes, &mut best_dist, &mut iters);
         
-        if best_dist < self.total_dist {
-            self.routes = best_routes;
-            self.total_dist = best_dist;
-        }
+        // Oczyszczamy z ewentualnych pustych tras i przepisujemy wynik
+        best_routes.retain(|r| !r.is_empty());
+        self.routes = best_routes;
+        self.total_dist = self.calculate_all_dist();
+        println!("B&B Finished. Iterations: {}, Final Vehicles: {}", iters, self.routes.len());
     }
 
     fn bb_recursive(
@@ -133,18 +137,21 @@ impl State {
         iters: &mut usize
     ) {
         *iters += 1;
-        // Limit iterations so the main thread doesn't lock up indefinitely for N=50
-        if *iters > 5_000_000 {
-            return;
+        if *iters % 5_000_000 == 0 {
+            println!("B&B Iterations: {}, Current Best Upper Bound: {:.2}", iters, best_dist);
         }
 
-        if current_dist >= *best_dist {
+        // Poprawiony warunek odcinania (Bounding) uwzględniający koszt otwartych tras
+        let active_vehicles = current_routes.iter().filter(|r| !r.is_empty()).count() as f32;
+        let total_current_score = current_dist + (active_vehicles * VEHICLE_COST);
+
+        if total_current_score >= *best_dist {
             return;
         }
 
         if unassigned.is_empty() {
-            *best_dist = current_dist;
-            *best_routes = current_routes.clone();
+            *best_dist = total_current_score;
+            best_routes.clone_from(current_routes);
             return;
         }
 
@@ -157,7 +164,9 @@ impl State {
                 if self.is_valid(&current_routes[r_idx]) {
                     let new_route_dist = self.calculate_route_dist(&current_routes[r_idx]);
                     let new_dist = current_dist - old_route_dist + new_route_dist;
-                    if new_dist < *best_dist {
+                    
+                    let next_score = new_dist + (current_routes.iter().filter(|r| !r.is_empty()).count() as f32 * VEHICLE_COST);
+                    if next_score < *best_dist {
                         self.bb_recursive(unassigned, current_routes, new_dist, best_routes, best_dist, iters);
                     }
                 }
@@ -166,9 +175,11 @@ impl State {
         }
 
         current_routes.push(vec![cust]);
-        let new_route_dist = self.calculate_route_dist(&current_routes.last().unwrap());
+        let new_route_dist = self.calculate_route_dist(current_routes.last().unwrap());
         let new_dist = current_dist + new_route_dist;
-        if new_dist < *best_dist {
+        
+        let next_score = new_dist + (current_routes.iter().filter(|r| !r.is_empty()).count() as f32 * VEHICLE_COST);
+        if next_score < *best_dist {
             self.bb_recursive(unassigned, current_routes, new_dist, best_routes, best_dist, iters);
         }
         current_routes.pop();
@@ -179,27 +190,39 @@ impl State {
     fn update_sa(&mut self) {
         if self.temp < 0.01 { return; }
 
-        let r1_idx = self.rng.random_range(0..self.routes.len());
-        
-        if self.rng.random_bool(0.5) && self.routes[r1_idx].len() >= 2 {
-            
-            let mut new_route = self.routes[r1_idx].clone();
-            let i = self.rng.random_range(0..new_route.len());
-            let j = self.rng.random_range(0..new_route.len());
-            new_route.swap(i, j);
+        self.iterations += 1;
+        if self.iterations % 100 == 0 {
+            self.temp *= 0.99;
+            self.total_dist = self.calculate_all_dist();
+        }
 
-            if self.is_valid(&new_route) {
-                let old_d = self.calculate_route_dist(&self.routes[r1_idx]);
-                let new_d = self.calculate_route_dist(&new_route);
-                let delta = (new_d - old_d) as f64;
+        if self.routes.is_empty() { return; }
 
-                if delta < 0.0 || self.rng.random_range(0.0..1.0) < (-delta / self.temp).exp() {
-                    self.routes[r1_idx] = new_route;
-                    self.total_dist = self.calculate_all_dist();
+        let op = self.rng.random_range(0..4);
+
+        if op == 0 { // Intra-route 2-opt
+            let r_idx = self.rng.random_range(0..self.routes.len());
+            if self.routes[r_idx].len() >= 3 {
+                let mut new_route = self.routes[r_idx].clone();
+                let i = self.rng.random_range(0..new_route.len() - 1);
+                let j = self.rng.random_range((i + 1)..new_route.len());
+                if i < j {
+                    new_route[i..=j].reverse();
+
+                    if self.is_valid(&new_route) {
+                        let old_c = self.calculate_route_dist(&self.routes[r_idx]);
+                        let new_c = self.calculate_route_dist(&new_route);
+                        let delta = (new_c - old_c) as f64;
+
+                        if delta < 0.0 || self.rng.random_range(0.0..1.0) < (-delta / self.temp).exp() {
+                            self.routes[r_idx] = new_route;
+                            self.total_dist += delta as f32;
+                        }
+                    }
                 }
             }
-        } else {
-            
+        } else if op == 1 { // Inter-route Relocate
+            let r1_idx = self.rng.random_range(0..self.routes.len());
             let r2_idx = self.rng.random_range(0..self.routes.len());
             if r1_idx == r2_idx || self.routes[r1_idx].is_empty() { return; }
 
@@ -214,19 +237,75 @@ impl State {
             new_r2.insert(insert_pos, customer);
 
             if self.is_valid(&new_r1) && self.is_valid(&new_r2) {
-                let old_d = self.calculate_route_dist(&self.routes[r1_idx]) + self.calculate_route_dist(&self.routes[r2_idx]);
-                let new_d = self.calculate_route_dist(&new_r1) + self.calculate_route_dist(&new_r2);
-                let delta = (new_d - old_d) as f64;
+                let v_cost = 2000.0;
+                let old_cost = (if self.routes[r1_idx].is_empty() { 0.0 } else { self.calculate_route_dist(&self.routes[r1_idx]) + v_cost }) +
+                               (if self.routes[r2_idx].is_empty() { 0.0 } else { self.calculate_route_dist(&self.routes[r2_idx]) + v_cost });
+                let new_cost = (if new_r1.is_empty() { 0.0 } else { self.calculate_route_dist(&new_r1) + v_cost }) +
+                               (if new_r2.is_empty() { 0.0 } else { self.calculate_route_dist(&new_r2) + v_cost });
+                
+                let delta = (new_cost - old_cost) as f64;
+
+                if delta < 0.0 || self.rng.random_range(0.0..1.0) < (-delta / self.temp).exp() {
+                    let dist_delta = (self.calculate_route_dist(&new_r1) + self.calculate_route_dist(&new_r2)) - 
+                                     (self.calculate_route_dist(&self.routes[r1_idx]) + self.calculate_route_dist(&self.routes[r2_idx]));
+                    self.routes[r1_idx] = new_r1;
+                    self.routes[r2_idx] = new_r2;
+                    if self.routes[r1_idx].is_empty() || self.routes[r2_idx].is_empty() {
+                        self.routes.retain(|r| !r.is_empty());
+                        self.total_dist = self.calculate_all_dist();
+                    } else {
+                        self.total_dist += dist_delta;
+                    }
+                }
+            }
+        } else if op == 2 { // Inter-route Swap
+            let r1_idx = self.rng.random_range(0..self.routes.len());
+            let r2_idx = self.rng.random_range(0..self.routes.len());
+            if r1_idx == r2_idx || self.routes[r1_idx].is_empty() || self.routes[r2_idx].is_empty() { return; }
+
+            let c1_idx = self.rng.random_range(0..self.routes[r1_idx].len());
+            let c2_idx = self.rng.random_range(0..self.routes[r2_idx].len());
+
+            let mut new_r1 = self.routes[r1_idx].clone();
+            let mut new_r2 = self.routes[r2_idx].clone();
+            
+            let temp_c = new_r1[c1_idx];
+            new_r1[c1_idx] = new_r2[c2_idx];
+            new_r2[c2_idx] = temp_c;
+
+            if self.is_valid(&new_r1) && self.is_valid(&new_r2) {
+                let old_dist = self.calculate_route_dist(&self.routes[r1_idx]) + self.calculate_route_dist(&self.routes[r2_idx]);
+                let new_dist = self.calculate_route_dist(&new_r1) + self.calculate_route_dist(&new_r2);
+                let delta = (new_dist - old_dist) as f64;
 
                 if delta < 0.0 || self.rng.random_range(0.0..1.0) < (-delta / self.temp).exp() {
                     self.routes[r1_idx] = new_r1;
                     self.routes[r2_idx] = new_r2;
-                    self.routes.retain(|r| !r.is_empty());
-                    self.total_dist = self.calculate_all_dist();
+                    self.total_dist += delta as f32;
+                }
+            }
+        } else if op == 3 { // Intra-route Swap
+            let r_idx = self.rng.random_range(0..self.routes.len());
+            if self.routes[r_idx].len() >= 2 {
+                let mut new_route = self.routes[r_idx].clone();
+                let i = self.rng.random_range(0..new_route.len());
+                let j = self.rng.random_range(0..new_route.len());
+                if i != j {
+                    new_route.swap(i, j);
+
+                    if self.is_valid(&new_route) {
+                        let old_c = self.calculate_route_dist(&self.routes[r_idx]);
+                        let new_c = self.calculate_route_dist(&new_route);
+                        let delta = (new_c - old_c) as f64;
+
+                        if delta < 0.0 || self.rng.random_range(0.0..1.0) < (-delta / self.temp).exp() {
+                            self.routes[r_idx] = new_route;
+                            self.total_dist += delta as f32;
+                        }
+                    }
                 }
             }
         }
-        self.temp *= 0.99999;
     }
 
     fn draw(&self) {
@@ -246,7 +325,6 @@ impl State {
             Color::from_rgba(127, 127, 0, 255),
             Color::from_rgba(127, 127, 127, 255),
         ];
-        //let colors = [RED, BLUE, GREEN, YELLOW, PURPLE, ORANGE, MAGENTA];
         for (i, route) in self.routes.iter().enumerate() {
             let color = colors[i % colors.len()];
             let mut prev = self.depot;
