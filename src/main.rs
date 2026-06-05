@@ -1,10 +1,12 @@
 use ::macroquad::prelude::*;
 use ::rand::{rng, RngExt, rngs::ThreadRng};
+use std::time::Instant;
 
 const BORDER: f32 = 50.0;
 const VEHICLE_CAPACITY: f32 = 100.0;
 const DEPOT_TIME_WINDOW: f32 = 4000.0;
 const VEHICLE_COST: f32 = 2000.0; // Dodana stała kosztu pojazdu zgodna z SA
+const TESTING: bool = false;
 
 #[derive(Clone, Debug)]
 struct Customer {
@@ -124,7 +126,7 @@ impl State {
         best_routes.retain(|r| !r.is_empty());
         self.routes = best_routes;
         self.total_dist = self.calculate_all_dist();
-        println!("B&B Finished. Iterations: {}, Final Vehicles: {}", iters, self.routes.len());
+        //println!("B&B Finished. Iterations: {}, Final Vehicles: {}", iters, self.routes.len());
     }
 
     fn bb_recursive(
@@ -187,8 +189,8 @@ impl State {
         unassigned.push(cust);
     }
 
-    fn update_sa(&mut self) {
-        if self.temp < 0.01 { return; }
+    fn update_sa(&mut self) -> bool {
+        if self.temp < 0.01 { return true; }
 
         self.iterations += 1;
         if self.iterations % 100 == 0 {
@@ -196,7 +198,7 @@ impl State {
             self.total_dist = self.calculate_all_dist();
         }
 
-        if self.routes.is_empty() { return; }
+        if self.routes.is_empty() { return false; }
 
         let op = self.rng.random_range(0..4);
 
@@ -224,7 +226,7 @@ impl State {
         } else if op == 1 { // Inter-route Relocate
             let r1_idx = self.rng.random_range(0..self.routes.len());
             let r2_idx = self.rng.random_range(0..self.routes.len());
-            if r1_idx == r2_idx || self.routes[r1_idx].is_empty() { return; }
+            if r1_idx == r2_idx || self.routes[r1_idx].is_empty() { return false; }
 
             let cust_idx = self.rng.random_range(0..self.routes[r1_idx].len());
             let customer = self.routes[r1_idx][cust_idx];
@@ -261,7 +263,7 @@ impl State {
         } else if op == 2 { // Inter-route Swap
             let r1_idx = self.rng.random_range(0..self.routes.len());
             let r2_idx = self.rng.random_range(0..self.routes.len());
-            if r1_idx == r2_idx || self.routes[r1_idx].is_empty() || self.routes[r2_idx].is_empty() { return; }
+            if r1_idx == r2_idx || self.routes[r1_idx].is_empty() || self.routes[r2_idx].is_empty() { return false; }
 
             let c1_idx = self.rng.random_range(0..self.routes[r1_idx].len());
             let c2_idx = self.rng.random_range(0..self.routes[r2_idx].len());
@@ -306,6 +308,7 @@ impl State {
                 }
             }
         }
+        false
     }
 
     fn draw(&self) {
@@ -352,7 +355,9 @@ impl State {
 fn window_conf() -> Conf {
     Conf {
         window_title: "CVRPTW Solver".to_owned(),
-        fullscreen: true,
+        //fullscreen: true,
+        window_width: 900,
+        window_height: 1000,
         ..Default::default()
     }
 }
@@ -366,6 +371,29 @@ async fn main() {
     let mut state = State::new(default_num);
     let mut working = false;
     let mut working_rendered = false;
+
+    if TESTING {
+        let mut states: Vec<State> = (0..17).map(|i| State::new(i)).collect();
+        let mut i = 0;
+        for state in states.iter_mut() {
+            let start = Instant::now();
+            state.solve_exact();
+            let duration = start.elapsed();
+            println!("Customers: {}, Vehicles: {}, Distance: {:.2}, Time: {:.2?}s", i, state.routes.len(), state.total_dist, duration.as_secs_f64());
+            i += 1;
+        }
+        i = 0;
+        for state in states.iter_mut() {
+            state.soft_reset();
+        }
+        for state in states.iter_mut() {
+            let start = Instant::now();
+            while !state.update_sa() {}
+            let duration = start.elapsed();
+            println!("SA - Customers: {}, Vehicles: {}, Distance: {:.2}, Time: {:.2?}s", i, state.routes.len(), state.total_dist, duration.as_secs_f64());
+            i += 1;
+        }
+    }
 
     loop {
         clear_background(BLACK);
@@ -381,7 +409,9 @@ async fn main() {
         if !working {
             if is_key_down(KeyCode::Space) {
                 for _ in 0..500 {
-                    state.update_sa();
+                    if state.update_sa() {
+                        break;
+                    }
                 }
             }
 
