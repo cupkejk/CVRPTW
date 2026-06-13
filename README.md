@@ -43,8 +43,19 @@ Progress is printed to stdout every 5,000,000 iterations. Note that this algorit
 ```bash
 cargo run --release
 ```
+---
+
+### Testing
+```bash
+cargo run --release -- test
+```
 
 ---
+
+### Documentation
+```bash
+cargo doc --open
+```
 
 ## Controls
 
@@ -61,7 +72,7 @@ cargo run --release
 ## Visualization
 Each vehicle route is drawn in a distinct color. The white square at the center is the depot; grey circles are customers. The HUD shows the current number of vehicles, total route distance, and SA temperature. When running the exact solver, a "Working..." overlay is displayed.
 
-The window opens at **900 × 1000** pixels.
+The window opens at **1280 x 720** pixels.
 
 ---
 
@@ -81,7 +92,8 @@ The window opens at **900 × 1000** pixels.
 ---
 
 ## Testing / Benchmarking
-Setting the `TESTING` constant to `true` runs a headless benchmark instead of opening the interactive window. It instantiates problems of size 0–16 customers, solves each with B&B and then with SA (after a soft reset), and prints the vehicle count, total distance, and wall-clock time for every instance to stdout.
+Running the program with `test` flag, runs a benchmark instead of opening the interactive window. It instantiates problems of size 0–16 customers, solves each with B&B and then with SA (after a soft reset), and prints the vehicle count, total distance, and wall-clock time for every instance to stdout.
+
 
 ---
 

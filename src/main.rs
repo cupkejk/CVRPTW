@@ -1,12 +1,14 @@
 use ::macroquad::prelude::*;
 use ::rand::{rng, RngExt, rngs::ThreadRng};
 use std::time::Instant;
+use std::env;
+use std::process::exit;
+
 
 const BORDER: f32 = 50.0;
 const VEHICLE_CAPACITY: f32 = 100.0;
 const DEPOT_TIME_WINDOW: f32 = 4000.0;
 const VEHICLE_COST: f32 = 2000.0; // Dodana stała kosztu pojazdu zgodna z SA
-const TESTING: bool = false;
 
 #[derive(Clone, Debug)]
 struct Customer {
@@ -356,8 +358,8 @@ fn window_conf() -> Conf {
     Conf {
         window_title: "CVRPTW Solver".to_owned(),
         //fullscreen: true,
-        window_width: 900,
-        window_height: 1000,
+        window_width: 1280,
+        window_height: 720,
         ..Default::default()
     }
 }
@@ -372,7 +374,9 @@ async fn main() {
     let mut working = false;
     let mut working_rendered = false;
 
-    if TESTING {
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() > 1 && args[1] == "test" {
         let mut states: Vec<State> = (0..17).map(|i| State::new(i)).collect();
         let mut i = 0;
         for state in states.iter_mut() {
@@ -393,6 +397,7 @@ async fn main() {
             println!("SA - Customers: {}, Vehicles: {}, Distance: {:.2}, Time: {:.2?}s", i, state.routes.len(), state.total_dist, duration.as_secs_f64());
             i += 1;
         }
+        exit(0);
     }
 
     loop {
